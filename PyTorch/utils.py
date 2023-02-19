@@ -1,5 +1,7 @@
+# by yhpark 2023-02-19
 import torch
-import cv2
+import torchvision
+import cv2, os, struct, time
 import numpy as np
 
 class_name = [  #bg +  1000 classes #"background",
@@ -25,11 +27,36 @@ class_name = [  #bg +  1000 classes #"background",
    "gyromitra","stinkhorn carrion fungus","earthstar","hen-of-the-woods hen of the woods Polyporus frondosus Grifola frondosa","bolete","ear spike capitulum","toilet tissue toilet paper bathroom tissue"
 ]
 
+# check device & get device info
+def device_check():
+    print('[Device Check]')
+    if torch.cuda.is_available():
+        print(f'gpu device count : {torch.cuda.device_count()}')
+        print(f'device_name : {torch.cuda.get_device_name(0)}')
+        print(f'torch gpu available : {torch.cuda.is_available()}')
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu:0")
+    print(f"device : {device} is available")
+    return device
+
 def to_numpy(tensor):
     return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
-# 전처리 함수
-def preprocess_(img, half):
+# load resnet18 model
+def load_resnet18():
+    if not os.path.exists('./model'):  # 저장할 폴더가 없다면
+        os.makedirs('./model')  # 폴더 생성
+        print('make directory {} is done'.format('./model'))
+
+    if os.path.isfile('./model/resnet18.pth'):  # resnet18.pth 파일이 있다면
+        net = torch.load('./model/resnet18.pth')  # resnet18.pth 파일 로드
+    else:  # resnet18.pth 파일이 없다면
+        net = torchvision.models.resnet18(pretrained=True)  # torchvision에서 resnet18 pretrained weight 다운로드 수행
+        torch.save(net, './model/resnet18.pth')  # resnet18.pth 파일 저장
+
+    return net
+
+# preprocess function
+def preprocess(img, half, device):
     with torch.no_grad():
         img2 = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # bgr -> rgb
         img3 = img2.transpose(2, 0, 1)              # hwc -> chw
@@ -39,39 +66,13 @@ def preprocess_(img, half):
         if half:                                    # f32 -> f16
             img5 = img5.half()
         img6 = img5.unsqueeze(0)                    # [c,h,w] -> [1,c,h,w]
-
-        return img6
-
-# 전처리 및 추론 연산 함수
-def infer(img, net, half, device):
-    with torch.no_grad():
-        img2 = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)     # bgr -> rgb
-        img3 = img2.transpose(2, 0, 1)                  # hwc -> chw
-        img4 = img3.astype(np.float32)                  # uint -> float32
-        img4 /= 255                                     # 1/255
-        img5 = torch.from_numpy(img4)                   # numpy -> tensor
-        if half:
-            img5 = img5.half()
-        img6 = img5.unsqueeze(0)                        # [c,h,w] -> [1,c,h,w]
         img6 = img6.to(device)
-        out = net(img6)
-        return out
 
-
+    return img6
 
 # 전처리 및 추론 연산 함수
 def infer_onnx(img, net, half,device):
-    img2 = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # bgr -> rgb
-    img3 = img2.transpose(2, 0, 1)              # hwc -> chw
-    img4 = img3.astype(np.float32)              # uint -> float32
-    img4 /= 255                                 # 1/255
-    img5 = torch.from_numpy(img4)               # numpy -> tensor
-    if half:                                    # f32 -> f16
-        img5 = img5.half()
-    img6 = img5.unsqueeze(0)                    # [c,h,w] -> [1,c,h,w]
-    img6 = img6.to(device)
-
-    ort_inputs = {net.get_inputs()[0].name: to_numpy(img6)}
+    img_ = preprocess(img, half, device)
+    ort_inputs = {net.get_inputs()[0].name: to_numpy(img_)}
     ort_outs = net.run(None, ort_inputs)
-
     return ort_outs[0]

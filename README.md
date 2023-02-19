@@ -18,6 +18,7 @@
   - tensorrt 8.4.3
   - pytorch 1.13.1+cu116
   - onnx 1.13.0
+  - onnxruntime-gpu 1.13.1
 
 ---
 
@@ -26,8 +27,8 @@
     TensorRT_ONNX/
     ├── data/ # input image
     ├── Pytorch/
-    │   ├─ resnet18.py # base pytorch model
-    │   ├─ resnet18_onnx.py # convert onnx
+    │   ├─ 1_resnet18_torch.py # base pytorch model
+    │   ├─ 2_resnet18_onnx.py  # generate onnx & onnxruntime model
     │   └─ utils.py  
     ├── TensorRT_ONNX/ 
     │   ├─ TensorRT_ONNX/
@@ -47,29 +48,29 @@
 	<tbody align="center">
 		<tr>
 			<td></td>
-			<td><strong>Pytorch</strong></td><td><strong>TensorRT</strong></td><td><strong>TensorRT</strong></td><td><strong>TensorRT</strong></td>
+			<td><strong>Pytorch</strong></td><td><strong>ONNX-RT</strong></td><td><strong>TensorRT</strong></td><td><strong>TensorRT</strong></td>
 		</tr>
 		<tr>
-			<td>Precision</td><td>FP32</td><td>FP32</td><td>FP16</td><td>Int8(PTQ)</td>
+			<td>Precision</td><td>FP32</td><td>FP32</td><td>FP32</td><td>Int8(PTQ)</td>
 		</tr>
 		<tr>
 			<td>Avg Duration time [ms]</td>
-			<td> ms</td>
-			<td> ms </td>
+			<td> 3.68 ms</td>
+			<td> 2.52 ms </td>
 			<td> ms</td>
 			<td> ms</td>
 		</tr>
 		<tr>
 			<td>FPS [frame/sec]</td>
-			<td> fps</td>
-			<td> fps</td>
+			<td> 271.14 fps</td>
+			<td> 396.47 fps</td>
 			<td> fps</td>
 			<td> fps</td>
 		</tr>
 		<tr>
 			<td>Memory [GB]</td>
-			<td> GB</td>
-			<td> GB</td>
+			<td> 1.7 GB</td>
+			<td> 1.3 GB</td>
 			<td> GB</td>
 			<td> GB</td>
 		</tr>

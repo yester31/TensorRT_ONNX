@@ -1,0 +1,11 @@
+Pytorch/model
+x64
+
+*.vs
+*.idea
+
+*.pth
+*.onnx
+
+*.engine
+*.table
