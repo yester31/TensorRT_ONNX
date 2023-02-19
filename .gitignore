@@ -1,5 +1,6 @@
 Pytorch/model
 x64
+__pycache__
 
 *.vs
 *.idea
