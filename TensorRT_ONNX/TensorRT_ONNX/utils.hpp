@@ -16,6 +16,18 @@
 #include "NvInferRuntime.h"
 #include "NvInferPlugin.h"
 
+// CUDA RUNTIME API 에러 체크를 위한 매크로 함수 정의
+#define CHECK(status) \
+    do\
+    {\
+        auto ret = (status);\
+        if (ret != 0)\
+        {\
+            std::cerr << "Cuda failure: " << ret << std::endl;\
+            abort();\
+        }\
+    } while (0)
+
 
 // 파일 이름 가져오기(DFS) window용
 int SearchFile(const std::string& folder_path, std::vector<std::string> &file_names, bool recursive = false);
@@ -71,3 +83,7 @@ std::map<std::string, nvinfer1::Weights> loadWeights(const std::string file);
 // Print Tensor dimensions information
 void show_dims(nvinfer1::ITensor* tensor);
 
+void Preprocess(std::vector<float> &output, std::vector<uint8_t>& input, int BatchSize, int channels, int height, int width);
+
+// 특정 폴더내 파일 이름 리스트 출력 함수
+int read_files_in_dir(const char *p_dir_name, std::vector<std::string> &file_names);

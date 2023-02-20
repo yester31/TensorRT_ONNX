@@ -1,8 +1,7 @@
-#include "utils.hpp"		// custom function
-#include "logging.hpp"	
-//#include "calibrator.h"		// ptq
+#include "utils.hpp" // custom function
+#include "logging.hpp" // logger
+#include "calibrator.hpp" // for ptq
 #include "parserOnnxConfig.h"
-#include "buffers.h"
 
 using namespace nvinfer1;
 sample::Logger gLogger;
@@ -12,9 +11,11 @@ static const int INPUT_H = 224;
 static const int INPUT_W = 224;
 static const int INPUT_C = 3;
 static const int OUTPUT_SIZE = 1000;
-static const int precision_mode = 32; // fp32 : 32, fp16 : 16, int8(ptq) : 8
-const char* INPUT_BLOB_NAME = "data";
-const char* OUTPUT_BLOB_NAME = "prob";
+static const int precision_mode = 8; // fp32 : 32, fp16 : 16, int8(ptq) : 8
+const char* INPUT_BLOB_NAME = "input";
+const char* OUTPUT_BLOB_NAME = "output";
+std::string onnx_file = "../../PyTorch/model/resnet18_cuda__trt.onnx";
+uint64_t iter_count = 10000;
 
 // imagenet label name 1000
 std::vector<std::string> class_names{  // 1000 classes
@@ -40,34 +41,200 @@ std::vector<std::string> class_names{  // 1000 classes
     "gyromitra","stinkhorn carrion fungus","earthstar","hen-of-the-woods hen of the woods Polyporus frondosus Grifola frondosa","bolete","ear spike capitulum","toilet tissue toilet paper bathroom tissue"
 };
 
-// Creat the engine using only the API and not any parser.
-void createEngine(unsigned int maxBatchSize, IBuilder* builder, IBuilderConfig* config, DataType dt, char* engineFileName)
+// Creat the engine using onnx.
+void createEngine(int maxBatchSize, IBuilder* builder, IBuilderConfig* config, DataType dt, char* engine_file_path)
 {
     std::cout << "==== model build start ====" << std::endl << std::endl;
 
     const auto explicitBatch = 1U << static_cast<uint32_t>(NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
     INetworkDefinition* network = builder->createNetworkV2(explicitBatch);
-    //INetworkDefinition* network = builder->createNetworkV2(0U);
+    if (!network) {
+        std::string msg("failed to make network");
+        gLogger.log(nvinfer1::ILogger::Severity::kERROR, msg.c_str());
+        exit(EXIT_FAILURE);
+    }
 
-    auto parser = nvonnxparser::createParser(*network, sample::gLogger.getTRTLogger());
-
-    auto parsed = parser->parseFromFile("../../PyTorch/model/opti_resnet18_cuda.onnx", static_cast<int>(sample::gLogger.getReportableSeverity()));
+    auto parser = nvonnxparser::createParser(*network, gLogger.getTRTLogger());
+    if (!parser->parseFromFile(onnx_file.c_str(), (int)nvinfer1::ILogger::Severity::kINFO)) {
+        std::string msg("failed to parse onnx file");
+        gLogger.log(nvinfer1::ILogger::Severity::kERROR, msg.c_str());
+        exit(EXIT_FAILURE);
+    }
 
     // Build engine
     //builder->setMaxBatchSize(maxBatchSize);
-    //config->setMaxWorkspaceSize(1ULL << 29); // 512MB
+    config->setMaxWorkspaceSize(1ULL << 30); // 30:1GB, 29:512MB
+    if (precision_mode == 16) {
+        std::cout << "==== precision f16 ====" << std::endl << std::endl;
+        config->setFlag(BuilderFlag::kFP16);
+    }
+    else if (precision_mode == 8) {
+        std::cout << "==== precision int8 ====" << std::endl << std::endl;
+        std::cout << "Your platform support int8: " << builder->platformHasFastInt8() << std::endl;
+        assert(builder->platformHasFastInt8());
+        config->setFlag(BuilderFlag::kINT8);
+        Int8EntropyCalibrator2 *calibrator = new Int8EntropyCalibrator2(1, INPUT_W, INPUT_H, 0, "../../calib_data/", "../Engine/resnet18_i8_calib.table", INPUT_BLOB_NAME);
+        config->setInt8Calibrator(calibrator);
+    }
+    else {
+        std::cout << "==== precision f32 ====" << std::endl << std::endl;
+    }
+
+    std::cout << "Building engine, please wait for a while..." << std::endl;
+
+    IHostMemory* engine = builder->buildSerializedNetwork(*network, *config);
+    if (!engine) {
+        std::string msg("failed to make engine");
+        gLogger.log(nvinfer1::ILogger::Severity::kERROR, msg.c_str());
+        exit(EXIT_FAILURE);
+    }
+    std::cout << "==== model build done ====" << std::endl << std::endl;
+
+    std::cout << "==== model selialize start ====" << std::endl << std::endl;
+    std::ofstream p(engine_file_path, std::ios::binary);
+    if (!p) {
+        std::cerr << "could not open plan output file" << std::endl << std::endl;
+    }
+    p.write(reinterpret_cast<const char*>(engine->data()), engine->size());
+    std::cout << "==== model selialize done ====" << std::endl << std::endl;
+
+    engine->destroy();
+    network->destroy();
+    p.close();
+}
+
+IScaleLayer* addBatchNorm2d(INetworkDefinition *network, std::map<std::string, Weights>& weightMap, ITensor& input, std::string lname, float eps) {
+    float *gamma = (float*)weightMap[lname + ".weight"].values;
+    float *beta = (float*)weightMap[lname + ".bias"].values;
+    float *mean = (float*)weightMap[lname + ".running_mean"].values;
+    float *var = (float*)weightMap[lname + ".running_var"].values;
+    int len = weightMap[lname + ".running_var"].count;
+
+    float *scval = reinterpret_cast<float*>(malloc(sizeof(float) * len));
+    for (int i = 0; i < len; i++) {
+        scval[i] = gamma[i] / sqrt(var[i] + eps);
+    }
+    Weights scale{ DataType::kFLOAT, scval, len };
+
+    float *shval = reinterpret_cast<float*>(malloc(sizeof(float) * len));
+    for (int i = 0; i < len; i++) {
+        shval[i] = beta[i] - mean[i] * gamma[i] / sqrt(var[i] + eps);
+    }
+    Weights shift{ DataType::kFLOAT, shval, len };
+
+    float *pval = reinterpret_cast<float*>(malloc(sizeof(float) * len));
+    for (int i = 0; i < len; i++) {
+        pval[i] = 1.0;
+    }
+    Weights power{ DataType::kFLOAT, pval, len };
+
+    weightMap[lname + ".scale"] = scale;
+    weightMap[lname + ".shift"] = shift;
+    weightMap[lname + ".power"] = power;
+    IScaleLayer* scale_1 = network->addScale(input, ScaleMode::kCHANNEL, shift, scale, power);
+    assert(scale_1);
+    return scale_1;
+}
+
+IActivationLayer* basicBlock(INetworkDefinition *network, std::map<std::string, Weights>& weightMap, ITensor& input, int inch, int outch, int stride, std::string lname) {
+    Weights emptywts{ DataType::kFLOAT, nullptr, 0 };
+
+    IConvolutionLayer* conv1 = network->addConvolutionNd(input, outch, DimsHW{ 3, 3 }, weightMap[lname + "conv1.weight"], emptywts);
+    assert(conv1);
+    conv1->setStrideNd(DimsHW{ stride, stride });
+    conv1->setPaddingNd(DimsHW{ 1, 1 });
+
+    IScaleLayer* bn1 = addBatchNorm2d(network, weightMap, *conv1->getOutput(0), lname + "bn1", 1e-5);
+
+    IActivationLayer* relu1 = network->addActivation(*bn1->getOutput(0), ActivationType::kRELU);
+    assert(relu1);
+
+    IConvolutionLayer* conv2 = network->addConvolutionNd(*relu1->getOutput(0), outch, DimsHW{ 3, 3 }, weightMap[lname + "conv2.weight"], emptywts);
+    assert(conv2);
+    conv2->setPaddingNd(DimsHW{ 1, 1 });
+
+    IScaleLayer* bn2 = addBatchNorm2d(network, weightMap, *conv2->getOutput(0), lname + "bn2", 1e-5);
+
+    IElementWiseLayer* ew1;
+    if (inch != outch) {
+        IConvolutionLayer* conv3 = network->addConvolutionNd(input, outch, DimsHW{ 1, 1 }, weightMap[lname + "downsample.0.weight"], emptywts);
+        assert(conv3);
+        conv3->setStrideNd(DimsHW{ stride, stride });
+        IScaleLayer* bn3 = addBatchNorm2d(network, weightMap, *conv3->getOutput(0), lname + "downsample.1", 1e-5);
+        ew1 = network->addElementWise(*bn3->getOutput(0), *bn2->getOutput(0), ElementWiseOperation::kSUM);
+    }
+    else {
+        ew1 = network->addElementWise(input, *bn2->getOutput(0), ElementWiseOperation::kSUM);
+    }
+    IActivationLayer* relu2 = network->addActivation(*ew1->getOutput(0), ActivationType::kRELU);
+    assert(relu2);
+    return relu2;
+}
+
+// Creat the engine using only the API and not any parser.
+void createEngine2(int maxBatchSize, IBuilder* builder, IBuilderConfig* config, DataType dt, char* engineFileName)
+{
+    std::cout << "==== model build start ====" << std::endl << std::endl;
+    INetworkDefinition* network = builder->createNetworkV2(1U << static_cast<uint32_t>(NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)); //explicit batch mode [N,C,H,W]
+
+    std::map<std::string, Weights> weightMap = loadWeights("../../PyTorch/model/resnet18.wts");
+    Weights emptywts{ DataType::kFLOAT, nullptr, 0 };
+
+    ITensor* data = network->addInput(INPUT_BLOB_NAME, dt, Dims4{ maxBatchSize,  INPUT_C, INPUT_H, INPUT_W });
+    assert(data);
+
+    IConvolutionLayer* conv1 = network->addConvolutionNd(*data, 64, DimsHW{ 7, 7 }, weightMap["conv1.weight"], emptywts);
+    assert(conv1);
+    conv1->setStrideNd(DimsHW{ 2, 2 });
+    conv1->setPaddingNd(DimsHW{ 3, 3 });
+
+    IScaleLayer* bn1 = addBatchNorm2d(network, weightMap, *conv1->getOutput(0), "bn1", 1e-5);
+
+    IActivationLayer* relu1 = network->addActivation(*bn1->getOutput(0), ActivationType::kRELU);
+    assert(relu1);
+
+    IPoolingLayer* pool1 = network->addPoolingNd(*relu1->getOutput(0), PoolingType::kMAX, DimsHW{ 3, 3 });
+    assert(pool1);
+    pool1->setStrideNd(DimsHW{ 2, 2 });
+    pool1->setPaddingNd(DimsHW{ 1, 1 });
+
+    IActivationLayer* relu2 = basicBlock(network, weightMap, *pool1->getOutput(0), 64, 64, 1, "layer1.0.");
+    IActivationLayer* relu3 = basicBlock(network, weightMap, *relu2->getOutput(0), 64, 64, 1, "layer1.1.");
+
+    IActivationLayer* relu4 = basicBlock(network, weightMap, *relu3->getOutput(0), 64, 128, 2, "layer2.0.");
+    IActivationLayer* relu5 = basicBlock(network, weightMap, *relu4->getOutput(0), 128, 128, 1, "layer2.1.");
+
+    IActivationLayer* relu6 = basicBlock(network, weightMap, *relu5->getOutput(0), 128, 256, 2, "layer3.0.");
+    IActivationLayer* relu7 = basicBlock(network, weightMap, *relu6->getOutput(0), 256, 256, 1, "layer3.1.");
+
+    IActivationLayer* relu8 = basicBlock(network, weightMap, *relu7->getOutput(0), 256, 512, 2, "layer4.0.");
+    IActivationLayer* relu9 = basicBlock(network, weightMap, *relu8->getOutput(0), 512, 512, 1, "layer4.1.");
+
+    IPoolingLayer* pool2 = network->addPoolingNd(*relu9->getOutput(0), PoolingType::kAVERAGE, DimsHW{ 7, 7 });
+    assert(pool2);
+    pool2->setStrideNd(DimsHW{ 1, 1 });
+
+    IFullyConnectedLayer* fc1 = network->addFullyConnected(*pool2->getOutput(0), 1000, weightMap["fc.weight"], weightMap["fc.bias"]);
+    assert(fc1);
+
+    fc1->getOutput(0)->setName(OUTPUT_BLOB_NAME);
+    network->markOutput(*fc1->getOutput(0));
+
+    // Build engine
+    builder->setMaxBatchSize(maxBatchSize);
+    config->setMaxWorkspaceSize(1ULL << 30); // 512MB
 
     if (precision_mode == 16) {
         std::cout << "==== precision f16 ====" << std::endl << std::endl;
         config->setFlag(BuilderFlag::kFP16);
     }
     else if (precision_mode == 8) {
-        //std::cout << "==== precision int8 ====" << std::endl << std::endl;
-        //std::cout << "Your platform support int8: " << builder->platformHasFastInt8() << std::endl;
-        //assert(builder->platformHasFastInt8());
-        //config->setFlag(BuilderFlag::kINT8);
-        //Int8EntropyCalibrator2 *calibrator = new Int8EntropyCalibrator2(1, INPUT_W, INPUT_H, 0, "../data_calib/", "../Int8_calib_table/resnet18_int8_calib.table", INPUT_BLOB_NAME);
-        //config->setInt8Calibrator(calibrator);
+        std::cout << "==== precision int8 ====" << std::endl << std::endl;
+        std::cout << "Your platform support int8: " << builder->platformHasFastInt8() << std::endl;
+        assert(builder->platformHasFastInt8());
+        config->setFlag(BuilderFlag::kINT8);
+        Int8EntropyCalibrator2 *calibrator = new Int8EntropyCalibrator2(1, INPUT_W, INPUT_H, 0, "../../calib_data/", "../Engine/resnet18_i8_calib.table", INPUT_BLOB_NAME);
+        config->setInt8Calibrator(calibrator);
     }
     else {
         std::cout << "==== precision f32 ====" << std::endl << std::endl;
@@ -75,7 +242,6 @@ void createEngine(unsigned int maxBatchSize, IBuilder* builder, IBuilderConfig* 
 
     std::cout << "Building engine, please wait for a while..." << std::endl;
     IHostMemory* engine = builder->buildSerializedNetwork(*network, *config);
-
     std::cout << "==== model build done ====" << std::endl << std::endl;
 
     std::cout << "==== model selialize start ====" << std::endl << std::endl;
@@ -88,6 +254,11 @@ void createEngine(unsigned int maxBatchSize, IBuilder* builder, IBuilderConfig* 
     engine->destroy();
     network->destroy();
     p.close();
+    // Release host memory
+    for (auto& mem : weightMap)
+    {
+        free((void*)(mem.second.values));
+    }
 }
 
 
@@ -95,7 +266,7 @@ int main()
 {
     // 변수 선언 
     unsigned int maxBatchSize = 1;	// 생성할 TensorRT 엔진파일에서 사용할 배치 사이즈 값 
-    bool serialize = true;			// Serialize 강제화 시키기(true 엔진 파일 생성)
+    bool serialize = false;			// Serialize 강제화 시키기(true 엔진 파일 생성)
     char engineFileName[] = "resnet18";
 
     char engine_file_path[256];
@@ -120,84 +291,19 @@ int main()
             exit(EXIT_FAILURE);
         }
 
-        //createEngine(maxBatchSize, builder, config, DataType::kFLOAT, engine_file_path); // *** Trt 모델 만들기 ***
-        
-        std::cout << "==== model build start ====" << std::endl << std::endl;
-
-        const auto explicitBatch = 1U << static_cast<uint32_t>(NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-        INetworkDefinition* network = builder->createNetworkV2(explicitBatch);
-        if (!network)
-        {
-            std::string msg("failed to make network");
-            gLogger.log(nvinfer1::ILogger::Severity::kERROR, msg.c_str());
-            exit(EXIT_FAILURE);
-        }
-
-        auto parser = nvonnxparser::createParser(*network, gLogger.getTRTLogger());
-
-        std::string onnx_file = "../../PyTorch/model/opti_resnet18_cuda.onnx";
-        if (!parser->parseFromFile(onnx_file.c_str(), (int)nvinfer1::ILogger::Severity::kWARNING)) {
-            std::string msg("failed to parse onnx file");
-            gLogger.log(nvinfer1::ILogger::Severity::kERROR, msg.c_str());
-            exit(EXIT_FAILURE);
-        }
-        //auto parsed = parser->parseFromFile(onnx_file.c_str(), static_cast<int>(gLogger.getReportableSeverity()));
-
         IBuilderConfig* config = builder->createBuilderConfig();
-        if (!config)
-        {
+        if (!config) {
             std::string msg("failed to make config");
             gLogger.log(nvinfer1::ILogger::Severity::kERROR, msg.c_str());
             exit(EXIT_FAILURE);
         }
+        
+        // *** onnx로 Trt 모델 만들기 ***
+        createEngine(maxBatchSize, builder, config, DataType::kFLOAT, engine_file_path);
 
-        // Build engine
-        builder->setMaxBatchSize(maxBatchSize);
-        config->setMaxWorkspaceSize(1ULL << 29); // 512MB
-        if (precision_mode == 16) {
-            std::cout << "==== precision f16 ====" << std::endl << std::endl;
-            config->setFlag(BuilderFlag::kFP16);
-        }
-        else if (precision_mode == 8) {
-            //std::cout << "==== precision int8 ====" << std::endl << std::endl;
-            //std::cout << "Your platform support int8: " << builder->platformHasFastInt8() << std::endl;
-            //assert(builder->platformHasFastInt8());
-            //config->setFlag(BuilderFlag::kINT8);
-            //Int8EntropyCalibrator2 *calibrator = new Int8EntropyCalibrator2(1, INPUT_W, INPUT_H, 0, "../data_calib/", "../Int8_calib_table/resnet18_int8_calib.table", INPUT_BLOB_NAME);
-            //config->setInt8Calibrator(calibrator);
-        }
-        else {
-            std::cout << "==== precision f32 ====" << std::endl << std::endl;
-        }
-
-        std::cout << "Building engine, please wait for a while..." << std::endl;
-
-        IHostMemory* engine = builder->buildSerializedNetwork(*network, *config);
-        if (!engine)
-        {
-            std::string msg("failed to make engine");
-            gLogger.log(nvinfer1::ILogger::Severity::kERROR, msg.c_str());
-            exit(EXIT_FAILURE);
-        }
-
-
-        std::cout << "==== model build done ====" << std::endl << std::endl;
-
-        std::cout << "==== model selialize start ====" << std::endl << std::endl;
-
-        std::ofstream p(engineFileName, std::ios::binary);
-        if (!p) {
-            std::cerr << "could not open plan output file" << std::endl << std::endl;
-        }
-        p.write(reinterpret_cast<const char*>(engine->data()), engine->size());
-
-        std::cout << "==== model selialize done ====" << std::endl << std::endl;
-
-        engine->destroy();
-        network->destroy();
-        p.close();
-
-
+        // *** Trt api로 Trt 모델 만들기 ***
+        //createEngine2(maxBatchSize, builder, config, DataType::kFLOAT, engine_file_path); 
+        
         builder->destroy();
         config->destroy();
         std::cout << "===== Create Engine file =====" << std::endl << std::endl; // 새로운 엔진 생성 완료
@@ -224,10 +330,6 @@ int main()
     std::cout << "===== Engine file deserialize =====" << std::endl << std::endl;
     IRuntime* runtime = createInferRuntime(gLogger);
     ICudaEngine* engine = runtime->deserializeCudaEngine(trtModelStream, size);
-
-    //// Create RAII buffer manager object
-    //samplesCommon::BufferManager buffers(std::shared_ptr<nvinfer1::ICudaEngine>engine);
-
     IExecutionContext* context = engine->createExecutionContext();
     delete[] trtModelStream;
 
@@ -236,11 +338,11 @@ int main()
     const int outputIndex = engine->getBindingIndex(OUTPUT_BLOB_NAME);
 
     // GPU에서 입력과 출력으로 사용할 메모리 공간할당
-    CHECK(cudaMalloc(&buffers[inputIndex], maxBatchSize * INPUT_C * INPUT_H * INPUT_W * sizeof(uint8_t)));
+    CHECK(cudaMalloc(&buffers[inputIndex], maxBatchSize * INPUT_C * INPUT_H * INPUT_W * sizeof(float)));
     CHECK(cudaMalloc(&buffers[outputIndex], maxBatchSize * OUTPUT_SIZE * sizeof(float)));
 
     // 4) 입력으로 사용할 이미지 준비하기
-    std::string img_dir = "./../data/";
+    std::string img_dir = "../../data/";
     std::vector<std::string> file_names;
     if (SearchFile(img_dir.c_str(), file_names) < 0) { // 이미지 파일 찾기
         std::cerr << "[ERROR] Data search error" << std::endl;
@@ -250,24 +352,26 @@ int main()
     }
     cv::Mat img(INPUT_H, INPUT_W, CV_8UC3);
     cv::Mat ori_img;
-    std::vector<uint8_t> input(maxBatchSize * INPUT_H * INPUT_W * INPUT_C);	// 입력이 담길 컨테이너 변수 생성
+    std::vector<uint8_t> input_i8(maxBatchSize * INPUT_H * INPUT_W * INPUT_C);
+    std::vector<float> input(maxBatchSize * INPUT_H * INPUT_W * INPUT_C);	// 입력이 담길 컨테이너 변수 생성
     std::vector<float> outputs(OUTPUT_SIZE);
     for (int idx = 0; idx < maxBatchSize; idx++) { // mat -> vector<uint8_t> 
         cv::Mat ori_img = cv::imread(file_names[idx]);
-        cv::resize(ori_img, img, img.size()); // input size로 리사이즈
-        memcpy(input.data(), img.data, maxBatchSize * INPUT_H * INPUT_W * INPUT_C);
+        //cv::resize(ori_img, img, img.size()); // input size로 리사이즈
+        memcpy(input_i8.data(), ori_img.data, maxBatchSize * INPUT_H * INPUT_W * INPUT_C);
+        Preprocess(input, input_i8, maxBatchSize , INPUT_C, INPUT_H, INPUT_W);
     }
     std::cout << "===== input load done =====" << std::endl << std::endl;
 
     uint64_t dur_time = 0;
-    uint64_t iter_count = 1000;
+
 
     // CUDA 스트림 생성
     cudaStream_t stream;
     CHECK(cudaStreamCreate(&stream));
 
     //속도 측정에서 첫 1회 연산 제외하기 위한 계산
-    CHECK(cudaMemcpyAsync(buffers[inputIndex], input.data(), maxBatchSize * INPUT_C * INPUT_H * INPUT_W * sizeof(uint8_t), cudaMemcpyHostToDevice, stream));
+    CHECK(cudaMemcpyAsync(buffers[inputIndex], input.data(), maxBatchSize * INPUT_C * INPUT_H * INPUT_W * sizeof(float), cudaMemcpyHostToDevice, stream));
     context->enqueueV2(buffers, stream, nullptr);
     CHECK(cudaMemcpyAsync(outputs.data(), buffers[outputIndex], maxBatchSize * OUTPUT_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream));
     cudaStreamSynchronize(stream);
@@ -276,7 +380,7 @@ int main()
     for (int i = 0; i < iter_count; i++) {
         auto start = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
-        CHECK(cudaMemcpyAsync(buffers[inputIndex], input.data(), maxBatchSize * INPUT_C * INPUT_H * INPUT_W * sizeof(uint8_t), cudaMemcpyHostToDevice, stream));
+        CHECK(cudaMemcpyAsync(buffers[inputIndex], input.data(), maxBatchSize * INPUT_C * INPUT_H * INPUT_W * sizeof(float), cudaMemcpyHostToDevice, stream));
         context->enqueueV2(buffers, stream, nullptr);
         CHECK(cudaMemcpyAsync(outputs.data(), buffers[outputIndex], maxBatchSize * OUTPUT_SIZE * sizeof(float), cudaMemcpyDeviceToHost, stream));
         cudaStreamSynchronize(stream);

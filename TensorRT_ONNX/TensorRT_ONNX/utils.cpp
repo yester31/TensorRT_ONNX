@@ -158,4 +158,57 @@ void show_dims(nvinfer1::ITensor* tensor)
     }
 }
 
+void Preprocess(std::vector<float> &output, std::vector<uint8_t>& input, int BatchSize, int channels, int height, int width)
+{
+    /*
+        INPUT  = BGR[NHWC](0, 255)
+        OUTPUT = RGB[NCHW](0.f,1.f)
+        This equation include 3 steps
+        1. Scale Image to range [0.f, 1.0f], /255
+        2. Shuffle form HWC to CHW
+        3. BGR -> RGB
+    */
+    int offset = channels * height * width;
+    int b_off, c_off, h_off, h_off_o, w_off_o;
+    for (int b = 0; b < BatchSize; b++) {
+        b_off = b * offset;
+        for (int c = 0; c < channels; c++) {
+            c_off = c * height * width + b_off;
+            for (int h = 0; h < height; h++) {
+                h_off = h * width + c_off;
+                h_off_o = h * width * channels + b_off;
+                for (int w = 0; w < width; w++) {
+                    int dstIdx = h_off + w;
+                    int srcIdx = h_off_o + w * channels + 2 - c;
+                    output[dstIdx] = (static_cast<const float>(input[srcIdx]) / 255.f);
+                }
+            }
+        }
+    }
+};
 
+// 특정 폴더내 파일 이름 리스트 출력 함수
+int read_files_in_dir(const char *p_dir_name, std::vector<std::string> &file_names) {
+    _finddata_t file_info;
+    const std::string folder_path = p_dir_name;
+    std::string any_file_pattern = folder_path + "\\*";
+    intptr_t handle = _findfirst(any_file_pattern.c_str(), &file_info);
+
+    if (handle == -1)
+    {
+        std::cerr << "folder path not exist: " << folder_path << std::endl;
+        return -1;
+    }
+    do
+    {
+        std::string file_name = file_info.name;
+        if (!(file_info.attrib & _A_SUBDIR))//check whtether it is a sub direcotry or a file
+        {
+            //std::string file_path = folder_path + "/" + file_name;
+            file_names.push_back(file_name);
+        }
+
+    } while (_findnext(handle, &file_info) == 0);
+    _findclose(handle);
+    return 0;
+}

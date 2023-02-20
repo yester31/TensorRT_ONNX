@@ -1,5 +1,10 @@
 # TensorRT_ONNX
 
+## to do
+- compare the trt model using onnx and the trt model with trt api 
+- DLA option check
+- code refactoring
+
 ### 0. Introduction
 - Goal : Convert pytorch model to TensorRT int8 model using by ONNX for use in C++ code.
 - Process : Pytorch model(python)->ONNX->TensorRT Model(C++)->TensorRT INT8 Model(C++)
@@ -18,22 +23,31 @@
   - tensorrt 8.4.3
   - pytorch 1.13.1+cu116
   - onnx 1.13.0
-  - onnxruntime-gpu 1.13.1
+  - onnxruntime-gpu 1.14.0
 
 ---
 
 ### 2. Code Scheme
 ```
     TensorRT_ONNX/
+    ├── calib_data/ # 100 images for ptq
     ├── data/ # input image
     ├── Pytorch/
-    │   ├─ 1_resnet18_torch.py # base pytorch model
-    │   ├─ 2_resnet18_onnx.py  # generate onnx & onnxruntime model
+    │   ├─ model/ 						# onnx, pth, wts files
+    │   ├─ 1_resnet18_torch.py 			# base pytorch model
+    │   ├─ 2_resnet18_onnx_runtime.py  	# make onnx & onnxruntime model
+    │   ├─ 3_resnet18_onnx.py  			# make onnx for TRT
+    │   ├─ 4_resnet18_gen_wts.py  		# make weight(.wts) for api TRT model 
     │   └─ utils.py  
     ├── TensorRT_ONNX/ 
+    │   ├─ Engine/ 				# TRT engine file & calibration cach table
     │   ├─ TensorRT_ONNX/
-    │   │   ├─ main.cpp
-    │   │   └─ calibration.cpp # for int8
+    │   │   ├─ calibrator.cpp 	# for ptq
+    │   │   ├─ calibrator.hpp 	# for ptq
+    │   │   ├─ logging.hpp
+    │   │   ├─ main.cpp 		# main code
+    │   │   ├─ utils.cpp 		# utils
+    │   │   └─ utils.hpp 		# utils
     │   └─ TensorRT_ONNX.sln  
     ├── LICENSE
     └── README.md
@@ -48,33 +62,36 @@
 	<tbody align="center">
 		<tr>
 			<td></td>
-			<td><strong>Pytorch</strong></td><td><strong>ONNX-RT</strong></td><td><strong>TensorRT</strong></td><td><strong>TensorRT</strong></td>
+			<td><strong>Pytorch</strong></td><td><strong>ONNX-RT</strong></td><td><strong>TensorRT</strong></td><td><strong>TensorRT</strong></td><td><strong>TensorRT</strong></td>
 		</tr>
 		<tr>
-			<td>Precision</td><td>FP32</td><td>FP32</td><td>FP32</td><td>Int8(PTQ)</td>
+			<td>Precision</td><td>FP32</td><td>FP32</td><td>FP32</td><td>FP16</td><td>Int8(PTQ)</td>
 		</tr>
 		<tr>
 			<td>Avg Duration time [ms]</td>
 			<td> 3.68 ms</td>
 			<td> 2.52 ms </td>
-			<td> ms</td>
-			<td> ms</td>
+			<td> 1.32 ms</td>
+			<td> 0.56 ms</td>
+			<td> 0.41 ms</td>
 		</tr>
 		<tr>
 			<td>FPS [frame/sec]</td>
 			<td> 271.14 fps</td>
 			<td> 396.47 fps</td>
-			<td> fps</td>
-			<td> fps</td>
+			<td> 757.00 fps</td>
+			<td> 1797.6 fps</td>
+			<td> 2444.9 fps</td>
 		</tr>
 		<tr>
 			<td>Memory [GB]</td>
-			<td> 1.7 GB</td>
-			<td> 1.3 GB</td>
-			<td> GB</td>
-			<td> GB</td>
+			<td> 1.58 GB</td>
+			<td> 1.18 GB</td>
+			<td> 0.31 GB</td>
+			<td> 0.27 GB</td>
+			<td> 0.25 GB</td>
 		</tr>
 	</tbody>
 </table>
 
-### 4. ...
+### 4. compare onnx trt and trt api
