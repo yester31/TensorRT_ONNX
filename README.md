@@ -30,24 +30,24 @@
 ### 2. Code Scheme
 ```
     TensorRT_ONNX/
-    ├── calib_data/ # 100 images for ptq
-    ├── data/ # input image
+    ├── calib_data/ 					# 100 images for ptq
+    ├── data/ 							# input image
     ├── Pytorch/
-    │   ├─ model/ 						# onnx, pth, wts files
-    │   ├─ 1_resnet18_torch.py 			# base pytorch model
-    │   ├─ 2_resnet18_onnx_runtime.py  	# make onnx & onnxruntime model
-    │   ├─ 3_resnet18_onnx.py  			# make onnx for TRT
-    │   ├─ 4_resnet18_gen_wts.py  		# make weight(.wts) for api TRT model 
+    │   ├─ model/						# onnx, pth, wts files
+    │   ├─ 1_resnet18_torch.py			# base pytorch model
+    │   ├─ 2_resnet18_onnx_runtime.py	# make onnx & onnxruntime model
+    │   ├─ 3_resnet18_onnx.py			# make onnx for TRT
+    │   ├─ 4_resnet18_gen_wts.py		# make weight(.wts) for api TRT model 
     │   └─ utils.py  
     ├── TensorRT_ONNX/ 
-    │   ├─ Engine/ 				# TRT engine file & calibration cach table
+    │   ├─ Engine/						# engine file & calibration cach table
     │   ├─ TensorRT_ONNX/
-    │   │   ├─ calibrator.cpp 	# for ptq
-    │   │   ├─ calibrator.hpp 	# for ptq
+    │   │   ├─ calibrator.cpp			# for ptq
+    │   │   ├─ calibrator.hpp
     │   │   ├─ logging.hpp
-    │   │   ├─ main.cpp 		# main code
-    │   │   ├─ utils.cpp 		# utils
-    │   │   └─ utils.hpp 		# utils
+    │   │   ├─ main.cpp					# main code
+    │   │   ├─ utils.cpp
+    │   │   └─ utils.hpp
     │   └─ TensorRT_ONNX.sln  
     ├── LICENSE
     └── README.md

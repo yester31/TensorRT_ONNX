@@ -84,9 +84,6 @@
   <ItemGroup>
     <ClCompile Include="calibrator.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="resnet18_.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-    </ClCompile>
     <ClCompile Include="utils.cpp" />
   </ItemGroup>
   <ItemGroup>
