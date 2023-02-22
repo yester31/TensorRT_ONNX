@@ -2,7 +2,6 @@
 
 ## to do
 - compare the trt model using onnx and the trt model with trt api 
-- DLA option check
 - code refactoring
 
 ### 0. Introduction

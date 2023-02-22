@@ -14,7 +14,7 @@ static const int OUTPUT_SIZE = 1000;
 static const int precision_mode = 8; // fp32 : 32, fp16 : 16, int8(ptq) : 8
 const char* INPUT_BLOB_NAME = "input";
 const char* OUTPUT_BLOB_NAME = "output";
-std::string onnx_file = "../../PyTorch/model/resnet18_cuda__trt.onnx";
+std::string onnx_file = "../../PyTorch/model/resnet18_cuda_trt.onnx";
 uint64_t iter_count = 10000;
 
 // imagenet label name 1000
@@ -78,6 +78,28 @@ void createEngine(int maxBatchSize, IBuilder* builder, IBuilderConfig* config, D
     }
     else {
         std::cout << "==== precision f32 ====" << std::endl << std::endl;
+    }
+
+    bool dlaflag = false;
+    int32_t dlaCore = builder->getNbDLACores();
+    bool allowGPUFallback = true;
+    std::cout << "the number of DLA engines available to this builder :: " << dlaCore << std::endl << std::endl;
+    if (dlaCore >= 0 && dlaflag){
+        if (builder->getNbDLACores() == 0){
+            std::cerr << "Trying to use DLA core on a platform that doesn't have any DLA cores"
+                << std::endl;
+            assert("Error: use DLA core on a platfrom that doesn't have any DLA cores" && false);
+        }
+        if (allowGPUFallback){
+            config->setFlag(BuilderFlag::kGPU_FALLBACK);
+        }
+        if (!config->getFlag(BuilderFlag::kINT8)){
+            // User has not requested INT8 Mode.
+            // By default run in FP16 mode. FP32 mode is not permitted.
+            config->setFlag(BuilderFlag::kFP16);
+        }
+        config->setDefaultDeviceType(DeviceType::kDLA);
+        config->setDLACore(dlaCore);
     }
 
     std::cout << "Building engine, please wait for a while..." << std::endl;
@@ -266,7 +288,7 @@ int main()
 {
     // 변수 선언 
     unsigned int maxBatchSize = 1;	// 생성할 TensorRT 엔진파일에서 사용할 배치 사이즈 값 
-    bool serialize = false;			// Serialize 강제화 시키기(true 엔진 파일 생성)
+    bool serialize = true;			// Serialize 강제화 시키기(true 엔진 파일 생성)
     char engineFileName[] = "resnet18";
 
     char engine_file_path[256];
