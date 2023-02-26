@@ -1,12 +1,8 @@
 # TensorRT_ONNX
 
-## to do
-- compare the trt model using onnx and the trt model with trt api 
-- code refactoring
-
 ### 0. Introduction
 - Goal : Convert pytorch model to TensorRT int8 model using by ONNX for use in C++ code.
-- Process : Pytorch model(python)->ONNX->TensorRT Model(C++)->TensorRT INT8 Model(C++)
+- Process : Pytorch model(python) -> ONNX -> TensorRT Model(C++) -> TensorRT PTQ INT8 Model(C++)
 - Sample Model : Resnet18 
 
 ---
@@ -45,9 +41,9 @@
     │   │   ├─ calibrator.hpp
     │   │   ├─ logging.hpp
     │   │   ├─ main.cpp               # main code
-    │   │   ├─ utils.cpp
+    │   │   ├─ utils.cpp              # custom util functions
     │   │   └─ utils.hpp
-    │   └─ TensorRT_ONNX.sln  
+    │   └─ TensorRT_ONNX.sln
     ├── LICENSE
     └── README.md
 ```
@@ -92,5 +88,3 @@
 		</tr>
 	</tbody>
 </table>
-
-### 4. compare onnx trt and trt api

@@ -1,4 +1,5 @@
 # by yhpark 2023-02-21
+# resnet18 weight extractor for tensorrt cpp example
 from utils import *
 def main():
 
@@ -11,7 +12,7 @@ def main():
     if os.path.isfile('model/resnet18.wts'):
         print('Already, resnet18.wts file exists.')
     else:
-        print('making resnet18.wts file ...')        # vgg.wts 파일이 없다면 생성
+        print('Create resnet18.wts file ...')        # Create resnet18.wts file if it doesn't exist
         f = open("model/resnet18.wts", 'w')
         f.write("{}\n".format(len(net.state_dict().keys())))
         for k, v in net.state_dict().items():

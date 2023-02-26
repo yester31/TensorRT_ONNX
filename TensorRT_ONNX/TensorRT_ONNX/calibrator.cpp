@@ -1,26 +1,27 @@
 #include <iostream>
 #include <iterator>
 #include <fstream>
-#include <opencv2/dnn/dnn.hpp>
-#include "calibrator.hpp"
-#include "cuda_runtime_api.h"
-#include "utils.hpp"		
 #include <opencv2/opencv.hpp>
+#include <opencv2/dnn/dnn.hpp>
+
+#include "cuda_runtime_api.h"
+#include "calibrator.hpp"
+#include "utils.hpp"		
 
 
-Int8EntropyCalibrator2::Int8EntropyCalibrator2(int batchsize, int input_w, int input_h, int process_type, const char* img_dir, const char* calib_table_name, const char* input_blob_name, bool read_cache)
+Int8EntropyCalibrator2::Int8EntropyCalibrator2(int batchsize, int input_c, int input_w, int input_h, const char* img_dir, const char* calib_table_name, const char* input_blob_name, bool read_cache)
     : batchsize_(batchsize)
+    , input_c_(input_c)
     , input_w_(input_w)
     , input_h_(input_h)
     , img_idx_(0)
-    , process_type_(process_type)
     , img_dir_(img_dir)
     , calib_table_name_(calib_table_name)
     , input_blob_name_(input_blob_name)
     , read_cache_(read_cache)
 {
-    input_count_ = 3 * input_w * input_h * batchsize;
-    input_size_ = 3 * input_w * input_h;
+    input_count_ = input_c * input_w * input_h * batchsize;
+    input_size_ = input_c * input_w * input_h;
     CHECK(cudaMalloc(&device_input_, input_count_ * sizeof(float)));
     read_files_in_dir(img_dir, img_files_);
 }
@@ -41,28 +42,22 @@ bool Int8EntropyCalibrator2::getBatch(void* bindings[], const char* names[], int
         return false;
     }
 
-    if (process_type_ == 0) { // resnet
-        std::vector<uint8_t> input_imgs_(input_count_, 0);
-        std::vector<float> input(input_size_);	// 입력이 담길 컨테이너 변수 생성
-        cv::Mat img(input_h_, input_w_, CV_8UC3);
-        for (int i = img_idx_; i < img_idx_ + batchsize_; i++) {
-            std::cout << img_files_[i] << "  " << i << std::endl;
-            cv::Mat temp = cv::imread(img_dir_ + img_files_[i]);
-            if (temp.empty()) {
-                std::cerr << "Fatal error: image cannot open!" << std::endl;
-                return false;
-            }
-            cv::resize(temp, img, img.size(), cv::INTER_LINEAR);
-            memcpy(input_imgs_.data() + (i - img_idx_) * input_size_, img.data, input_size_);
-            Preprocess(input, input_imgs_, 1, 3, input_h_, input_w_);
+    std::vector<uint8_t> input_imgs_(input_count_, 0);
+    std::vector<float> input(input_size_);
+    cv::Mat img(input_h_, input_w_, CV_8UC3);
+    for (int i = img_idx_; i < img_idx_ + batchsize_; i++) {
+        std::cout << img_files_[i] << "  " << i << std::endl;
+        cv::Mat temp = cv::imread(img_dir_ + img_files_[i]);
+        if (temp.empty()) {
+            std::cerr << "Fatal error: image cannot open!" << std::endl;
+            return false;
         }
-        img_idx_ += batchsize_;
-        CHECK(cudaMemcpy(device_input_, input.data(), input_count_ * sizeof(float), cudaMemcpyHostToDevice));
+        cv::resize(temp, img, img.size(), cv::INTER_LINEAR);
+        memcpy(input_imgs_.data() + (i - img_idx_) * input_size_, img.data, input_size_);
+        Preprocess(input, input_imgs_, batchsize_, input_c_, input_h_, input_w_);
     }
-    else { // 
-        std::cerr << "Fatal error: pre-preprocess type is wrong!" << std::endl;
-        return false;
-    }
+    img_idx_ += batchsize_;
+    CHECK(cudaMemcpy(device_input_, input.data(), input_count_ * sizeof(float), cudaMemcpyHostToDevice));
 
     assert(!strcmp(names[0], input_blob_name_));
     bindings[0] = device_input_;
@@ -88,4 +83,3 @@ void Int8EntropyCalibrator2::writeCalibrationCache(const void* cache, size_t len
     std::ofstream output(calib_table_name_, std::ios::binary);
     output.write(reinterpret_cast<const char*>(cache), length);
 }
-

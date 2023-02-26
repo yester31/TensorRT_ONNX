@@ -1,17 +1,21 @@
 # by yhpark 2023-02-19
+# resnet18 pytorch model example
 from utils import *
 from torchsummary import summary
 
+print("pytorch:", torch.__version__)
+
 # 0. setting parameters
-half = False # f16
-iteration = 1000
+half = False        # f16
+iteration = 100
 
 def main():
+    device = device_check()  # device check & define
+    # device = torch.device("cpu:0")
 
-    # 1. model
+    # 1. model generation
     net = load_resnet18()               # resnet18 model load
     net = net.eval()                    # set evaluation mode
-    device = device_check()             # device check
     net = net.to(device)                # to gpu
     if half:
         net.half()                      # to FP16
@@ -20,11 +24,11 @@ def main():
     summary(net, (3, 224, 224))         # print output shape & total parameter sizes for given input size
 
     # 2. input
-    img = cv2.imread('./../data/panda0.jpg') # image file load
+    img = cv2.imread('./../data/panda0.jpg')    # image file load
     img_ = preprocess(img, half, device)
 
     # 3. inference
-    out = net(img_)                           # except first inference
+    out = net(img_)                             # except first inference
     torch.cuda.synchronize()
     dur_time = 0
     for i in range(iteration):

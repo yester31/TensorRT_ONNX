@@ -1,7 +1,5 @@
 ﻿#include "utils.hpp"
 
-// 파일 이름 가져오기(DFS) window용
-// full path name
 int SearchFile(const std::string& folder_path, std::vector<std::string> &file_names, bool recursive)
 {
     _finddata_t file_info;
@@ -45,69 +43,10 @@ int SearchFile(const std::string& folder_path, std::vector<std::string> &file_na
     return 0;
 }
 
-void valueCheck(std::vector<float>& Input, int IN, int IC, int IH, int IW, bool one) {
-    std::cout << "===== valueCheck func =====" << std::endl;
-    if (one) IN = 1;
-    int tot = IN * IC * IH * IW;
-    if (Input.size() != tot) {
-        if (tot == 1)
-        {
-            IN = Input.size();
-        }
-        else {
-            return;
-        }
-    }
-    int N_offset = IC * IH * IW;
-    int C_offset, H_offset, W_offset, g_idx;
-    for (int ⁠n_idx = 0; ⁠n_idx < IN; ⁠n_idx++) {
-        C_offset = ⁠n_idx * N_offset;
-        for (int ⁠c_idx = 0; ⁠c_idx < IC; ⁠c_idx++) {
-            H_offset = ⁠c_idx * IW * IH + C_offset;
-            for (int ⁠h_idx = 0; ⁠h_idx < IH; ⁠h_idx++) {
-                W_offset = ⁠h_idx * IW + H_offset;
-                for (int w_idx = 0; w_idx < IW; w_idx++) {
-                    g_idx = w_idx + W_offset;
-                    std::cout << std::setw(5) << Input[g_idx] << " ";
-                }std::cout << std::endl;
-            }std::cout << std::endl; std::cout << std::endl;
-        }
-    }
-}
-
-void initTensor(std::vector<float>& output, float start, float step)
+int argMax(std::vector<float> &output) 
 {
-    std::cout << "===== InitTensor func (scalar or step)=====" << std::endl;
-    float count = start;
-    for (int i = 0; i < output.size(); i++) {
-        output[i] = count;
-        count += step;
-    }
-}
-
-void initTensor(std::vector<float>& output, std::string random, float min, float max)
-{
-    std::cout << "===== InitTensor func (random value) =====" << std::endl;
-
-    for (int i = 0; i < output.size(); i++) {
-        output[i] = min + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / (max - min)));
-    }
-}
-
-void initTensor(std::vector<float>& output, int N, int C, int H, int W, float start, float step) {
-    std::cout << "===== scalarTensor func =====" << std::endl;
-    std::cout << "Tensor[" << N << "][" << C << "][" << H << "][" << W << "]" << std::endl << std::endl;
-    int tot_size = N * C * H * W;
-    if (output.size() != tot_size)
-        output.resize(tot_size);
-    initTensor(output, start, step);
-}
-
-int argMax(std::vector<float> &output) {
-
     return max_element(output.begin(), output.end()) - output.begin();
 }
-//std::cout << "index : "<< argMax(output) << " , label name : " << class_names[argMax(output) ] << " , prob : " << output[argMax(output) ] << std::endl;
 
 std::map<std::string, nvinfer1::Weights> loadWeights(const std::string file)
 {
@@ -187,7 +126,6 @@ void Preprocess(std::vector<float> &output, std::vector<uint8_t>& input, int Bat
     }
 };
 
-// 특정 폴더내 파일 이름 리스트 출력 함수
 int read_files_in_dir(const char *p_dir_name, std::vector<std::string> &file_names) {
     _finddata_t file_info;
     const std::string folder_path = p_dir_name;
