@@ -3,6 +3,7 @@
 #include "calibrator.hpp"       // for ptq
 #include "parserOnnxConfig.h"   // for onnx-parsing
 
+
 using namespace nvinfer1;
 sample::Logger gLogger;
 
@@ -11,9 +12,10 @@ static const int INPUT_H = 224;
 static const int INPUT_W = 224;
 static const int INPUT_C = 3;
 static const int OUTPUT_SIZE = 1000;
-static const int precision_mode = 8;        // fp32 : 32, fp16 : 16, int8(ptq) : 8
+static const int precision_mode = 32;        // fp32 : 32, fp16 : 16, int8(ptq) : 8
 const char* INPUT_BLOB_NAME = "input";      // use same input name with onnx model
 const char* OUTPUT_BLOB_NAME = "output";    // use same output name with onnx model
+const char* engine_dir_path = "../Engine";  // Engine directory path
 const char* engineFileName = "resnet18";    // model name
 const char* onnx_file = "../../PyTorch/model/resnet18_cuda_trt.onnx"; // onnx model file path
 bool ONNX_MODEL = true;                     // true : from ONNX , false : using TRT API
@@ -29,8 +31,8 @@ void createEngineUsingAPI(int maxBatchSize, IBuilder* builder, IBuilderConfig* c
 int main()
 {
     char engine_file_path[256];
-    sprintf(engine_file_path, "../Engine/%s_%d.engine", engineFileName, precision_mode);
-
+    sprintf(engine_file_path, "%s/%s_%d.engine", engine_dir_path, engineFileName, precision_mode);
+    mkdir(engine_dir_path);
     /*
     /! 1) Create engine file 
     /! If force serialize flag is true, recreate unconditionally

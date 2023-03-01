@@ -150,3 +150,16 @@ int read_files_in_dir(const char *p_dir_name, std::vector<std::string> &file_nam
     _findclose(handle);
     return 0;
 }
+
+
+void mkdir(const std::string &path) {
+    std::experimental::filesystem::path p(path);
+
+    if (std::experimental::filesystem::is_directory(p)) {
+        std::cout << "The folder already exists. : "<< path << std::endl;
+    }
+    else {
+        std::experimental::filesystem::create_directories(p);
+        std::cout << "The folder was created. : " << path << std::endl;
+    }
+}
