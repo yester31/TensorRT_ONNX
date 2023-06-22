@@ -3,6 +3,7 @@
 ### 0. Introduction
 - Goal : Convert pytorch model to TensorRT int8 model using by ONNX for use in C++ code.
 - Process : Pytorch model(python) -> ONNX -> TensorRT Model(C++) -> TensorRT PTQ INT8 Model(C++)
+- Process2 : Pytorch model(python) -> ONNX -> TensorRT Model(python)
 - Sample Model : Resnet18 
 
 ---
@@ -33,6 +34,8 @@
     │   ├─ 2_resnet18_onnx_runtime.py # make onnx & onnxruntime model
     │   ├─ 3_resnet18_onnx.py         # make onnx for TRT
     │   ├─ 4_resnet18_gen_wts.py      # make weight(.wts) for api TRT model 
+    │   ├─ 5_resnet18_trt.py          # make TRT model using python tensorrt api
+    │   ├─ common.py                  # for 5_resnet18_trt.py
     │   └─ utils.py  
     ├── TensorRT_ONNX/ 
     │   ├─ Engine/                    # engine file & calibration cach table
